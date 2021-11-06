@@ -3,7 +3,7 @@
 # CS3700, Fall 2021
 # TCP Project Starter Code
 
-DEBUG = True
+DEBUG = False
 import datetime
 import json
 import sys
