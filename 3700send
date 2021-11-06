@@ -1,0 +1,137 @@
+#!/usr/bin/python3
+#
+# CS3700, Fall 2021
+# TCP Project Starter Code
+#
+
+DEBUG = True
+import datetime
+import json
+import sys
+import socket
+import time
+
+from base64 import b64encode
+
+
+MSG_SIZE = 1500
+DATA_SIZE = 1000
+TIMEOUT = 0.5
+SEQUENCE = 0
+
+# Store most recent messages
+LASTMSG = []
+
+# Bind to localhost and an ephemeral port
+IP_PORT = sys.argv[1]
+UDP_IP = IP_PORT[0:IP_PORT.find(":")]
+UDP_PORT = int(IP_PORT[IP_PORT.find(":")+1:])
+dest = (UDP_IP, UDP_PORT)
+
+time.sleep(.5)
+
+# Set up the socket
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) 
+sock.settimeout(TIMEOUT)
+
+def log(string):
+  sys.stderr.write(datetime.datetime.now().strftime("%H:%M:%S.%f") + " 3700send: " + string + "\n")
+
+
+# Updates the recent packet storage
+def updateLASTMSG(msg,data, seq):
+  global LASTMSG
+  newLASTMSG = []
+  # Window size set here
+  if(len(LASTMSG) == 3):
+    for x in range(1,len(LASTMSG)):
+      newLASTMSG.append(LASTMSG[x])
+    newLASTMSG.append({'msg':msg, 'data':data, 'seq' : seq})
+    LASTMSG = newLASTMSG
+  else:
+    LASTMSG.append({'msg' : msg , 'data' : data, 'seq' : seq})
+  return
+
+def send_next_packet():
+  global SEQUENCE
+
+  data = sys.stdin.buffer.read(DATA_SIZE)
+  if (len(data) > 0):
+    # print(str(b64encode(data)))
+    msg = json.dumps({"sequence": SEQUENCE, "data": b64encode(data).decode(), "ack": False, "eof": False})
+    updateLASTMSG(msg, data, SEQUENCE)
+    if sock.sendto(msg.encode(), dest) < len(msg):
+      log("[error] unable to fully send packet")
+    else:
+      log("[send data] " + str(SEQUENCE) + " (" + str(len(data)) + ")")
+    SEQUENCE += len(data)
+    return True
+  else:
+    return False
+
+
+
+# Send first set of packets
+send_next_packet()
+
+# Now read in data, send packets
+while True:
+  log("ABOUT TO SLEEP")
+  #result = sock.recvfrom(MSG_SIZE)
+
+
+  try:
+    result = sock.recvfrom(MSG_SIZE)
+
+    if result:
+      (data, addr) = result
+      try:
+        decoded = json.loads(data.decode())
+        log("[recv pkt] " + str(decoded))
+        log("[recv ack] " + str(decoded['ack']))
+
+        if DEBUG:
+          log("Seq: " + str(SEQUENCE))
+
+        # If there is an ack, send next packet
+        if decoded['ack'] == SEQUENCE:
+          # Try to send next packet; break if no more data
+          if (not send_next_packet()):
+            break
+      
+        #If the ack is the wrong sequence, ignore
+        else:
+          if DEBUG:
+            log("\n\n DUPLICATE ACK \n\n")
+      
+      except (ValueError, KeyError, TypeError):
+        log("[recv corrupt packet]")
+  
+  
+    else:
+      #msg = json.dumps({"ack": "not recv"})
+      #log("ABOUT TO SEND " + msg)
+      #sent = sock.sendto(msg.encode(), dest)
+      #log("[sent] " + str(sent))
+      #if sent < len(msg):
+      #  log("[error] unable to fully send packet")
+      log("[error] timeout")
+      sys.exit(-1)
+
+
+  except socket.timeout:
+    #Assume packet dropped
+    if DEBUG:
+      log("\n\n PACKET DROPPED \n\n")
+    for item in LASTMSG:
+      SEQUENCE = item['seq']
+      if sock.sendto(item['msg'].encode(), dest) < len(item['msg']):
+        log("[error] unable to fully send packet")
+      else:
+        log("[send data] " + str(SEQUENCE) + " (" + str(len(item['data'])) + ")")
+      SEQUENCE += len(item['data'])
+
+
+
+sock.sendto(json.dumps({"eof": True, "data": "", "sequence": SEQUENCE, "ack": False}).encode(), dest)
+sys.exit(0)
